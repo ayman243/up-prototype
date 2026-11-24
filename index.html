@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>UP — نموذج أولي</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; overflow: hidden; background: #0b1220; direction: rtl;
+               font-family: -apple-system, "Segoe UI", Tahoma, sans-serif;
+               touch-action: none; overscroll-behavior: none; }
+  #game { display: block; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; }
+
+  .hud { position: fixed; top: env(safe-area-inset-top, 0); right: 0; left: 0;
+         display: flex; justify-content: space-between; align-items: flex-start;
+         padding: 12px 14px; pointer-events: none; color: #fff; z-index: 5; }
+  .hud .score { font-size: 34px; font-weight: 800; text-shadow: 0 2px 8px rgba(0,0,0,.45); line-height: 1; }
+  .hud .best  { font-size: 13px; opacity: .85; margin-top: 4px; }
+  .hud .belt  { font-size: 13px; opacity: .9; background: rgba(0,0,0,.25); padding: 4px 10px; border-radius: 99px; }
+
+  #gearBtn { position: fixed; bottom: calc(14px + env(safe-area-inset-bottom, 0)); left: 14px;
+             width: 44px; height: 44px; border-radius: 50%; border: none; z-index: 6;
+             background: rgba(255,255,255,.14); color: #fff; font-size: 22px; cursor: pointer;
+             backdrop-filter: blur(6px); }
+
+  #toast { position: fixed; top: 22%; left: 50%; transform: translateX(-50%);
+           color: #fff; font-size: 20px; font-weight: 700; letter-spacing: .5px;
+           background: rgba(0,0,0,.35); padding: 8px 22px; border-radius: 99px;
+           opacity: 0; transition: opacity .4s; pointer-events: none; z-index: 5; }
+
+  #overlay { position: fixed; inset: 0; display: flex; flex-direction: column; justify-content: center;
+             align-items: center; gap: 10px; color: #fff; text-align: center; z-index: 4;
+             background: rgba(5,10,25,.55); backdrop-filter: blur(3px); }
+  #overlay h1 { font-size: 44px; letter-spacing: 2px; }
+  #overlay .big { font-size: 56px; font-weight: 800; }
+  #overlay .sub { font-size: 15px; opacity: .85; max-width: 280px; line-height: 1.8; }
+  #overlay.hidden { display: none; }
+
+  #panel { position: fixed; inset: 0; z-index: 10; background: rgba(8,13,28,.96); color: #eee;
+           padding: 20px 18px calc(20px + env(safe-area-inset-bottom, 0)); overflow-y: auto; }
+  #panel.hidden { display: none; }
+  #panel h2 { font-size: 20px; margin-bottom: 4px; }
+  #panel .hint { font-size: 12px; opacity: .7; margin-bottom: 14px; }
+  .slider-row { margin-bottom: 13px; }
+  .slider-row label { display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 4px; }
+  .slider-row label b { font-variant-numeric: tabular-nums; color: #7fd4ff; }
+  .slider-row input { width: 100%; accent-color: #7fd4ff; }
+  .panel-btns { display: flex; gap: 10px; margin-top: 18px; }
+  .panel-btns button { flex: 1; padding: 12px; border: none; border-radius: 10px; font-size: 16px;
+                       font-weight: 700; cursor: pointer; }
+  #closePanel { background: #7fd4ff; color: #06263a; }
+  #resetPanel { background: rgba(255,255,255,.12); color: #fff; }
+
+  .mode-row { margin-bottom: 18px; }
+  .mode-row > span { display: block; font-size: 14px; margin-bottom: 6px; }
+  .seg { display: flex; gap: 8px; }
+  .seg button { flex: 1; padding: 11px; border: 1px solid rgba(255,255,255,.18); border-radius: 10px;
+                background: transparent; color: #cfd8e6; font-size: 15px; font-weight: 600; cursor: pointer; }
+  .seg button.on { background: #7fd4ff; color: #06263a; border-color: #7fd4ff; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div class="hud">
+  <div>
+    <div class="score" id="score">0م</div>
+    <div class="best" id="bestLabel">الأفضل: 0م</div>
+  </div>
+  <div class="belt" id="beltLabel">السماء الأولى</div>
+</div>
+
+<div id="toast"></div>
+
+<div id="overlay">
+  <h1>UP</h1>
+  <div class="big" id="ovScore" style="display:none">0م</div>
+  <div class="sub" id="ovText">اضغط مع الاستمرار للصعود<br>حرّك إصبعك يميناً ويساراً للتوجيه<br>ارفع إصبعك للهبوط</div>
+  <div class="sub" style="opacity:.6">اضغط في أي مكان للبدء</div>
+</div>
+
+<button id="gearBtn" title="ضبط الفيزياء">⚙︎</button>
+
+<div id="panel" class="hidden">
+  <h2>لوحة ضبط الإحساس</h2>
+  <div class="hint">حرّك القيم ثم أغلق والعب — الهدف: استجابة فورية وعدالة تامة. تُحفظ القيم تلقائياً.</div>
+  <div class="mode-row">
+    <span>نموذج التحكم</span>
+    <div class="seg">
+      <button id="modeHold" class="on">ضغط مطوّل</button>
+      <button id="modeTap">نقر متكرر</button>
+    </div>
+  </div>
+  <div id="sliders"></div>
+  <div class="panel-btns">
+    <button id="closePanel">إغلاق واللعب</button>
+    <button id="resetPanel">استعادة الافتراضي</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ---------- الإعدادات القابلة للضبط ---------- */
+const DEFAULTS = {
+  snap:      { v: 0.18, min: 0,    max: 1,    step: 0.02,name: "حدّة الاستجابة (قصّ الزخم)" },
+  gravity:   { v: 1900, min: 700,  max: 3600, step: 50,  name: "الجاذبية (هبوط)" },
+  lift:      { v: 2600, min: 1000, max: 5000, step: 50,  name: "قوة الرفع" },
+  tapImpulse:{ v: 560,  min: 250,  max: 1100, step: 20,  name: "قوة النقرة (وضع النقر)" },
+  maxRise:   { v: 620,  min: 300,  max: 1200, step: 20,  name: "أقصى سرعة صعود" },
+  maxFall:   { v: 840,  min: 300,  max: 1500, step: 20,  name: "أقصى سرعة هبوط" },
+  steer:     { v: 18,   min: 4,    max: 30,   step: 1,   name: "استجابة التوجيه" },
+  gapW:      { v: 175,  min: 100,  max: 280,  step: 5,   name: "عرض الفجوات (البداية)" },
+  rowGap:    { v: 235,  min: 140,  max: 380,  step: 5,   name: "التباعد بين العوائق (البداية)" },
+  rampTo:    { v: 1400, min: 500,  max: 3000, step: 100, name: "مدى تصاعد الصعوبة (م)" },
+  hitbox:    { v: 0.66, min: 0.4,  max: 1.0,  step: 0.02,name: "حجم منطقة الاصطدام (عدالة)" },
+};
+let S = {};
+let mode = "hold";   // hold | tap
+function loadSettings() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem("up_tuning") || "{}"); } catch (e) {}
+  for (const k in DEFAULTS) S[k] = (typeof saved[k] === "number") ? saved[k] : DEFAULTS[k].v;
+  try { mode = localStorage.getItem("up_mode") === "tap" ? "tap" : "hold"; } catch (e) {}
+}
+function saveSettings() {
+  try { localStorage.setItem("up_tuning", JSON.stringify(S)); localStorage.setItem("up_mode", mode); } catch (e) {}
+}
+loadSettings();
+
+/* ---------- أحزمة العوالم (كل 400م) ---------- */
+const BELTS = [
+  { name: "السماء الأولى",   top: "#3f7fd4", bot: "#a8d4f5", accent: "#1c4e8f", obstacle: "#2b5ea8" },
+  { name: "الرياح المتكسرة", top: "#2b8f9e", bot: "#9be3d8", accent: "#0f5f6b", obstacle: "#177586" },
+  { name: "المدينة النيونية", top: "#2a1a52", bot: "#7a3fa8", accent: "#e94fd4", obstacle: "#c026d3" },
+  { name: "الكهوف البلورية", top: "#0d1b3d", bot: "#28457a", accent: "#6fd6ff", obstacle: "#3a6ea5" },
+  { name: "المصنع العائم",   top: "#3d3226", top2: "", bot: "#8f7a58", accent: "#ffb020", obstacle: "#7a6845" },
+  { name: "منطقة الجاذبية",  top: "#160d33", bot: "#4a2d7a", accent: "#b48fff", obstacle: "#5d3f9e" },
+];
+const BELT_METERS = 400;
+const PX_PER_M = 10;
+
+/* ---------- تهيئة الرسم ---------- */
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+let W = 0, H = 0, DPR = 1;
+var booted = false;   // لا نلمس حالة اللعبة قبل تهيئتها
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  const prevW = W;
+  // بعض المتصفحات تُبلّغ بأبعاد صفرية أثناء التحميل أو في تبويب مخفي
+  W = Math.max(1, window.innerWidth || document.documentElement.clientWidth || 375);
+  H = Math.max(1, window.innerHeight || document.documentElement.clientHeight || 667);
+  canvas.width = W * DPR; canvas.height = H * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  if (!booted) return;
+  if (state === "ready" || state === "dead") reset();      // إعادة تهيئة بأبعاد صحيحة
+  else if (prevW > 0 && prevW !== W) {                      // تدوير الشاشة أثناء اللعب
+    ball.x = Math.max(BALL_R, Math.min(W - BALL_R, ball.x * (W / prevW)));
+    targetX = ball.x;
+  }
+}
+window.addEventListener("resize", resize);
+window.addEventListener("orientationchange", () => setTimeout(resize, 120));
+resize();
+
+/* ---------- حالة اللعبة ---------- */
+const BALL_R = 15;               // نصف القطر المرئي
+let state = "ready";             // ready | playing | dead | paused
+let ball, cameraY, startY, rows, lastRowY, meters, best, shake, flash, trail, time;
+let wasPressing = false;
+best = 0;
+try { best = parseFloat(localStorage.getItem("up_best") || "0") || 0; } catch (e) {}
+
+function reset() {
+  startY = 0;
+  ball = { x: W / 2, y: startY, vy: 0 };
+  cameraY = startY - H * 0.72;   // الكرة تبدأ قرب أسفل الشاشة
+  rows = [];
+  lastRowY = startY - 260;
+  meters = 0; shake = 0; flash = 0; time = 0;
+  trail = []; wasPressing = false;
+  spawnAhead();
+}
+
+/* ---------- توليد العوائق ---------- */
+function beltIndex() { return Math.floor(meters / BELT_METERS); }
+function beltData()  { return BELTS[beltIndex() % BELTS.length]; }
+
+function spawnAhead() {
+  // نولّد صفوفاً أعلى من حافة الشاشة العلوية بمسافة أمان
+  while (lastRowY > cameraY - 300) {
+    const mRow = (startY - lastRowY) / PX_PER_M;   // ارتفاع هذا الصف بالأمتار
+    const d = Math.min(1, mRow / S.rampTo);        // معامل الصعوبة: 0 عند البداية → 1 عند الذروة
+    const rowGap = Math.max(135, S.rowGap * (1 - 0.42 * d));   // كثافة أعلى مع الارتفاع
+    lastRowY -= rowGap * (0.85 + Math.random() * 0.3);
+    const gapW = Math.max(100, S.gapW * (1 - 0.34 * d));       // فجوات أضيق مع الارتفاع
+    const roll = Math.random();
+    const barH = 24;
+    if (mRow > 120 && roll < 0.18) {
+      // بوابة نابضة: تنفتح وتنغلق — تفرض التوقيت والتريّث (إفلات/هبوط)
+      const gx = gapW / 2 + 30 + Math.random() * (W - gapW - 60);
+      rows.push({ y: lastRowY, h: barH, gapX: gx, gapW: gapW * 1.35, pulse: true,
+                  speed: (1.5 + Math.random() * 0.8) * (1 + 0.6 * d), phase: Math.random() * 6.28 });
+    } else if (mRow > 200 && roll < 0.18 + 0.32 * d) {
+      // حاجز متحرك أفقياً — يزداد تكراراً وسرعةً مع الارتفاع
+      const gx = gapW / 2 + 40 + Math.random() * (W - gapW - 80);
+      rows.push({ y: lastRowY, h: barH, gapX: gx, gapW: gapW,
+                  amp: (40 + Math.random() * 50) * (1 + 0.5 * d),
+                  speed: (0.9 + Math.random() * 0.5) * (1 + 1.4 * d),
+                  phase: Math.random() * 6.28, moving: true });
+    } else if (mRow > 200 && roll < 0.50 + 0.15 * d) {
+      // ممر متعرج: صفّان متقاربان بفجوتين متباعدتين — يفرض إبطاء الصعود
+      const gx1 = gapW / 2 + 20 + Math.random() * (W - gapW - 40);
+      let gx2 = gx1 + (Math.random() < 0.5 ? -1 : 1) * (150 + Math.random() * 80);
+      gx2 = Math.max(gapW / 2 + 20, Math.min(W - gapW / 2 - 20, gx2));
+      rows.push({ y: lastRowY, h: barH, gapX: gx1, gapW: gapW });
+      rows.push({ y: lastRowY - 95, h: barH, gapX: gx2, gapW: gapW });
+      lastRowY -= 95;
+    } else if (roll < 0.72) {
+      // حاجز جانبي: يترك ممراً في أحد الجانبين
+      const fromLeft = Math.random() < 0.5;
+      const wBar = W - gapW - (20 + Math.random() * 60);
+      rows.push({ y: lastRowY, h: barH, side: true, fromLeft, w: Math.max(60, wBar) });
+    } else {
+      // حاجز بفجوة في موضع عشوائي
+      const gx = gapW / 2 + 20 + Math.random() * (W - gapW - 40);
+      rows.push({ y: lastRowY, h: barH, gapX: gx, gapW: gapW, moving: false });
+    }
+  }
+  // تنظيف الصفوف التي خرجت من أسفل الشاشة
+  rows = rows.filter(r => r.y < cameraY + H + 250);
+}
+
+/* ---------- الإدخال: اضغط واسحب ---------- */
+let pressing = false, targetX = W / 2;
+function pointerPos(e) { return e.touches ? e.touches[0].clientX : e.clientX; }
+
+function onDown(e) {
+  if (!document.getElementById("panel").classList.contains("hidden")) return;
+  if (e.target.closest("#gearBtn")) return;
+  e.preventDefault();
+  targetX = pointerPos(e);
+  pressing = true;
+  if (state === "ready") { state = "playing"; hideOverlay(); }
+  else if (state === "dead") { reset(); state = "playing"; hideOverlay(); }
+  if (mode === "tap" && state === "playing") ball.vy = -S.tapImpulse;  // نبضة فورية
+}
+function onMove(e) { if (pressing) { e.preventDefault(); targetX = pointerPos(e); } }
+function onUp() { pressing = false; }
+
+window.addEventListener("touchstart", onDown, { passive: false });
+window.addEventListener("touchmove", onMove, { passive: false });
+window.addEventListener("touchend", onUp);
+window.addEventListener("mousedown", onDown);
+window.addEventListener("mousemove", onMove);
+window.addEventListener("mouseup", onUp);
+// دعم لوحة المفاتيح للتجربة على الكمبيوتر
+const keys = {};
+window.addEventListener("keydown", e => {
+  keys[e.code] = true;
+  if (e.code === "Space") {
+    if (state === "ready") { state = "playing"; hideOverlay(); }
+    else if (state === "dead") { reset(); state = "playing"; hideOverlay(); }
+    else if (mode === "tap" && state === "playing" && !e.repeat) ball.vy = -S.tapImpulse;
+  }
+});
+window.addEventListener("keyup", e => { keys[e.code] = false; });
+
+/* ---------- واجهة ---------- */
+const overlay = document.getElementById("overlay");
+const ovScore = document.getElementById("ovScore");
+const ovText = document.getElementById("ovText");
+const scoreEl = document.getElementById("score");
+const bestEl = document.getElementById("bestLabel");
+const beltEl = document.getElementById("beltLabel");
+const toastEl = document.getElementById("toast");
+function hideOverlay() { overlay.classList.add("hidden"); }
+function showDeath() {
+  ovScore.style.display = "block";
+  ovScore.textContent = Math.floor(meters) + "م";
+  ovText.innerHTML = meters >= best && meters > 0 ? "🏆 رقم قياسي جديد!" : "الأفضل: " + Math.floor(best) + "م";
+  overlay.querySelector("h1").textContent = "انتهت الجولة";
+  overlay.classList.remove("hidden");
+}
+let toastTimer = null, lastBelt = 0;
+function toast(msg) {
+  toastEl.textContent = msg; toastEl.style.opacity = 1;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.style.opacity = 0, 1800);
+}
+
+/* ---------- لوحة الضبط ---------- */
+const panel = document.getElementById("panel");
+const slidersDiv = document.getElementById("sliders");
+function buildSliders() {
+  slidersDiv.innerHTML = "";
+  for (const k in DEFAULTS) {
+    const d = DEFAULTS[k];
+    const row = document.createElement("div");
+    row.className = "slider-row";
+    row.innerHTML = `<label><span>${d.name}</span><b id="val_${k}">${S[k]}</b></label>
+      <input type="range" id="sl_${k}" min="${d.min}" max="${d.max}" step="${d.step}" value="${S[k]}">`;
+    slidersDiv.appendChild(row);
+    row.querySelector("input").addEventListener("input", e => {
+      S[k] = parseFloat(e.target.value);
+      document.getElementById("val_" + k).textContent = S[k];
+      saveSettings();
+    });
+  }
+}
+document.getElementById("gearBtn").addEventListener("click", () => {
+  buildSliders();
+  panel.classList.remove("hidden");
+  if (state === "playing") state = "paused";
+});
+document.getElementById("closePanel").addEventListener("click", () => {
+  panel.classList.add("hidden");
+  if (state === "paused") state = "playing";
+});
+document.getElementById("resetPanel").addEventListener("click", () => {
+  for (const k in DEFAULTS) S[k] = DEFAULTS[k].v;
+  saveSettings(); buildSliders();
+});
+
+/* اختيار نموذج التحكم — للمقارنة المباشرة بين الضغط المطوّل والنقر */
+const modeHoldBtn = document.getElementById("modeHold");
+const modeTapBtn = document.getElementById("modeTap");
+function applyMode(m) {
+  mode = m;
+  modeHoldBtn.classList.toggle("on", m === "hold");
+  modeTapBtn.classList.toggle("on", m === "tap");
+  saveSettings();
+  updateHint();
+}
+modeHoldBtn.addEventListener("click", () => applyMode("hold"));
+modeTapBtn.addEventListener("click", () => applyMode("tap"));
+
+function updateHint() {
+  if (state !== "ready") return;
+  ovText.innerHTML = mode === "hold"
+    ? "اضغط مع الاستمرار للصعود<br>حرّك إصبعك يميناً ويساراً للتوجيه<br>ارفع إصبعك للهبوط"
+    : "انقر بتكرار للصعود<br>حرّك إصبعك يميناً ويساراً للتوجيه<br>توقف عن النقر للهبوط";
+}
+
+/* ---------- الفيزياء ---------- */
+function rowRects(r) {
+  // يعيد مستطيلات الصف الحالية (مع إزاحة الحركة إن وجدت)
+  if (r.side) {
+    return r.fromLeft ? [{ x: 0, y: r.y, w: r.w, h: r.h }]
+                      : [{ x: W - r.w, y: r.y, w: r.w, h: r.h }];
+  }
+  let gx = r.gapX;
+  let gw = r.gapW;
+  if (r.moving) gx += Math.sin(time * r.speed + r.phase) * r.amp;
+  if (r.pulse) {
+    // فتحة تتنفس: من شبه مغلقة إلى مفتوحة بالكامل
+    const open = 0.5 + 0.5 * Math.sin(time * r.speed + r.phase);
+    gw = r.gapW * (0.08 + 0.92 * open);
+  }
+  gx = Math.max(gw / 2 + 6, Math.min(W - gw / 2 - 6, gx));
+  return [
+    { x: 0, y: r.y, w: gx - gw / 2, h: r.h },
+    { x: gx + gw / 2, y: r.y, w: W - (gx + gw / 2), h: r.h },
+  ];
+}
+function circleRect(cx, cy, cr, rect) {
+  const nx = Math.max(rect.x, Math.min(cx, rect.x + rect.w));
+  const ny = Math.max(rect.y, Math.min(cy, rect.y + rect.h));
+  const dx = cx - nx, dy = cy - ny;
+  return dx * dx + dy * dy < cr * cr;
+}
+
+function update(dt) {
+  if (state !== "playing") return;
+  time += dt;
+
+  // دعم لوحة المفاتيح
+  const kbPress = keys["Space"];
+  const kbLeft = keys["ArrowLeft"], kbRight = keys["ArrowRight"];
+  const isPressing = pressing || kbPress;
+
+  // عمودي
+  if (mode === "hold") {
+    // قصّ الزخم عند تغيّر الاتجاه: يمنع "تعلّق" الكرة في الهواء عند رفع الإصبع
+    if (isPressing && !wasPressing && ball.vy > 0) ball.vy *= S.snap;
+    if (!isPressing && wasPressing && ball.vy < 0) ball.vy *= S.snap;
+    if (isPressing) ball.vy -= S.lift * dt;
+    else            ball.vy += S.gravity * dt;
+  } else {
+    ball.vy += S.gravity * dt;   // وضع النقر: جاذبية دائمة + نبضات لحظية
+  }
+  wasPressing = isPressing;
+  ball.vy = Math.max(-S.maxRise, Math.min(S.maxFall, ball.vy));
+  ball.y += ball.vy * dt;
+
+  // أفقي: انسياب نحو موضع الإصبع
+  if (kbLeft || kbRight) {
+    ball.x += (kbLeft ? -1 : 1) * 460 * dt;
+  } else if (mode === "tap" || pressing) {
+    ball.x += (targetX - ball.x) * Math.min(1, S.steer * dt);
+  }
+  ball.x = Math.max(BALL_R, Math.min(W - BALL_R, ball.x));
+
+  // الكاميرا: تصعد فقط (سقاطة) — الكرة لا تتجاوز 38% من أعلى الشاشة
+  const wantCam = ball.y - H * 0.38;
+  if (wantCam < cameraY) cameraY = wantCam;
+
+  // الأثر
+  trail.push({ x: ball.x, y: ball.y, a: 1 });
+  if (trail.length > 14) trail.shift();
+  trail.forEach(t => t.a *= 0.90);
+
+  // النتيجة والحزام
+  meters = Math.max(meters, (startY - ball.y) / PX_PER_M);
+  const b = beltIndex();
+  if (b !== lastBelt) {
+    lastBelt = b;
+    toast("🌍 " + beltData().name);
+    beltEl.textContent = beltData().name;
+  }
+
+  spawnAhead();
+
+  // الاصطدام (بمنطقة أصغر من الشكل = عدالة)
+  const hitR = BALL_R * S.hitbox;
+  for (const r of rows) {
+    if (Math.abs(r.y - ball.y) > 80) continue;
+    for (const rect of rowRects(r)) {
+      if (rect.w > 0 && circleRect(ball.x, ball.y, hitR, rect)) return die();
+    }
+  }
+  // السقوط خارج أسفل الشاشة
+  if (ball.y - cameraY > H + BALL_R) return die();
+}
+
+function die() {
+  state = "dead";
+  shake = 14; flash = 0.55;
+  if (meters > best) { best = meters; localStorage.setItem("up_best", best); }
+  bestEl.textContent = "الأفضل: " + Math.floor(best) + "م";
+  showDeath();
+  if (navigator.vibrate) navigator.vibrate(60);
+}
+
+/* ---------- الرسم ---------- */
+function lerpColor(c1, c2, t) {
+  const a = parseInt(c1.slice(1), 16), b = parseInt(c2.slice(1), 16);
+  const r = ((a >> 16) + (((b >> 16) - (a >> 16)) * t)) | 0;
+  const g = (((a >> 8) & 255) + ((((b >> 8) & 255) - ((a >> 8) & 255)) * t)) | 0;
+  const bl = ((a & 255) + (((b & 255) - (a & 255)) * t)) | 0;
+  return `rgb(${r},${g},${bl})`;
+}
+
+function draw() {
+  const bd = beltData();
+  const nextBd = BELTS[(beltIndex() + 1) % BELTS.length];
+  const beltProgress = (meters % BELT_METERS) / BELT_METERS;
+  // مزج تدريجي بين ألوان الحزام الحالي والتالي قرب النهاية
+  const blend = beltProgress > 0.85 ? (beltProgress - 0.85) / 0.15 : 0;
+
+  const sx = shake > 0.5 ? (Math.random() - 0.5) * shake : 0;
+  const sy = shake > 0.5 ? (Math.random() - 0.5) * shake : 0;
+  shake *= 0.86;
+
+  ctx.save();
+  ctx.translate(sx, sy);
+
+  // الخلفية
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, blend ? lerpColor(bd.top, nextBd.top, blend) : bd.top);
+  grad.addColorStop(1, blend ? lerpColor(bd.bot, nextBd.bot, blend) : bd.bot);
+  ctx.fillStyle = grad;
+  ctx.fillRect(-20, -20, W + 40, H + 40);
+
+  // خطوط ارتفاع خفيفة كل 100م (إحساس بالحركة)
+  ctx.strokeStyle = "rgba(255,255,255,.08)";
+  ctx.lineWidth = 1;
+  const lineStep = 100 * PX_PER_M;
+  let firstLine = Math.floor(cameraY / lineStep) * lineStep;
+  for (let ly = firstLine; ly < cameraY + H + lineStep; ly += lineStep) {
+    const sy2 = ly - cameraY;
+    ctx.beginPath(); ctx.moveTo(0, sy2); ctx.lineTo(W, sy2); ctx.stroke();
+    const m = Math.round((startY - ly) / PX_PER_M);
+    if (m > 0) {
+      ctx.fillStyle = "rgba(255,255,255,.25)";
+      ctx.font = "11px sans-serif";
+      ctx.fillText(m + "م", 8, sy2 - 5);
+    }
+  }
+
+  // العوائق
+  for (const r of rows) {
+    const yScr = r.y - cameraY;
+    if (yScr < -60 || yScr > H + 60) continue;
+    ctx.fillStyle = (r.moving || r.pulse) ? bd.accent : bd.obstacle;
+    for (const rect of rowRects(r)) {
+      if (rect.w <= 0) continue;
+      const rr = 8;
+      ctx.beginPath();
+      ctx.roundRect(rect.x - (rect.x > 0 ? 0 : 12), yScr, rect.w + (rect.x > 0 ? 12 : 12), rect.h, rr);
+      ctx.fill();
+    }
+  }
+
+  // الأثر
+  for (let i = 0; i < trail.length; i++) {
+    const t = trail[i];
+    ctx.globalAlpha = t.a * 0.35;
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(t.x, t.y - cameraY, BALL_R * (i / trail.length) * 0.8, 0, 6.29);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // الكرة
+  const by = ball.y - cameraY;
+  ctx.shadowColor = "rgba(255,255,255,.7)";
+  ctx.shadowBlur = 18;
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath(); ctx.arc(ball.x, by, BALL_R, 0, 6.29); ctx.fill();
+  ctx.shadowBlur = 0;
+  // لمعة صغيرة
+  ctx.fillStyle = "rgba(120,190,255,.9)";
+  ctx.beginPath(); ctx.arc(ball.x - 4, by - 5, 4.5, 0, 6.29); ctx.fill();
+
+  ctx.restore();
+
+  // وميض الموت
+  if (flash > 0.02) {
+    ctx.fillStyle = `rgba(255,80,80,${flash})`;
+    ctx.fillRect(0, 0, W, H);
+    flash *= 0.88;
+  }
+
+  scoreEl.textContent = Math.floor(meters) + "م";
+}
+
+/* ---------- الحلقة الرئيسية ---------- */
+let lastT = performance.now();
+function loop(now) {
+  let dt = (now - lastT) / 1000;
+  lastT = now;
+  if (dt > 0.05) dt = 0.05; // حماية من القفزات
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+bestEl.textContent = "الأفضل: " + Math.floor(best) + "م";
+applyMode(mode);
+reset();
+booted = true;
+resize();            // ضمان أبعاد صحيحة لو حُمّلت الصفحة في تبويب مخفي
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
