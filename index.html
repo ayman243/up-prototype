@@ -51,12 +51,6 @@
   #closePanel { background: #7fd4ff; color: #06263a; }
   #resetPanel { background: rgba(255,255,255,.12); color: #fff; }
 
-  .mode-row { margin-bottom: 18px; }
-  .mode-row > span { display: block; font-size: 14px; margin-bottom: 6px; }
-  .seg { display: flex; gap: 8px; }
-  .seg button { flex: 1; padding: 11px; border: 1px solid rgba(255,255,255,.18); border-radius: 10px;
-                background: transparent; color: #cfd8e6; font-size: 15px; font-weight: 600; cursor: pointer; }
-  .seg button.on { background: #7fd4ff; color: #06263a; border-color: #7fd4ff; }
 </style>
 </head>
 <body>
@@ -84,13 +78,6 @@
 <div id="panel" class="hidden">
   <h2>لوحة ضبط الإحساس</h2>
   <div class="hint">حرّك القيم ثم أغلق والعب — الهدف: استجابة فورية وعدالة تامة. تُحفظ القيم تلقائياً.</div>
-  <div class="mode-row">
-    <span>نموذج التحكم</span>
-    <div class="seg">
-      <button id="modeHold" class="on">ضغط مطوّل</button>
-      <button id="modeTap">نقر متكرر</button>
-    </div>
-  </div>
   <div id="sliders"></div>
   <div class="panel-btns">
     <button id="closePanel">إغلاق واللعب</button>
@@ -106,25 +93,22 @@ const DEFAULTS = {
   snap:      { v: 0.18, min: 0,    max: 1,    step: 0.02,name: "حدّة الاستجابة (قصّ الزخم)" },
   gravity:   { v: 1900, min: 700,  max: 3600, step: 50,  name: "الجاذبية (هبوط)" },
   lift:      { v: 2600, min: 1000, max: 5000, step: 50,  name: "قوة الرفع" },
-  tapImpulse:{ v: 560,  min: 250,  max: 1100, step: 20,  name: "قوة النقرة (وضع النقر)" },
   maxRise:   { v: 620,  min: 300,  max: 1200, step: 20,  name: "أقصى سرعة صعود" },
   maxFall:   { v: 840,  min: 300,  max: 1500, step: 20,  name: "أقصى سرعة هبوط" },
   steer:     { v: 18,   min: 4,    max: 30,   step: 1,   name: "استجابة التوجيه" },
-  gapW:      { v: 175,  min: 100,  max: 280,  step: 5,   name: "عرض الفجوات (البداية)" },
-  rowGap:    { v: 235,  min: 140,  max: 380,  step: 5,   name: "التباعد بين العوائق (البداية)" },
-  rampTo:    { v: 1400, min: 500,  max: 3000, step: 100, name: "مدى تصاعد الصعوبة (م)" },
+  gapW:      { v: 200,  min: 110,  max: 300,  step: 5,   name: "عرض الفجوات (البداية)" },
+  rowGap:    { v: 275,  min: 160,  max: 420,  step: 5,   name: "التباعد بين العوائق (البداية)" },
+  rampTo:    { v: 1800, min: 600,  max: 3500, step: 100, name: "مدى تصاعد الصعوبة (م)" },
   hitbox:    { v: 0.66, min: 0.4,  max: 1.0,  step: 0.02,name: "حجم منطقة الاصطدام (عدالة)" },
 };
 let S = {};
-let mode = "hold";   // hold | tap
 function loadSettings() {
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem("up_tuning") || "{}"); } catch (e) {}
   for (const k in DEFAULTS) S[k] = (typeof saved[k] === "number") ? saved[k] : DEFAULTS[k].v;
-  try { mode = localStorage.getItem("up_mode") === "tap" ? "tap" : "hold"; } catch (e) {}
 }
 function saveSettings() {
-  try { localStorage.setItem("up_tuning", JSON.stringify(S)); localStorage.setItem("up_mode", mode); } catch (e) {}
+  try { localStorage.setItem("up_tuning", JSON.stringify(S)); } catch (e) {}
 }
 loadSettings();
 
@@ -169,6 +153,7 @@ const BALL_R = 15;               // نصف القطر المرئي
 let state = "ready";             // ready | playing | dead | paused
 let ball, cameraY, startY, rows, lastRowY, meters, best, shake, flash, trail, time;
 let wasPressing = false;
+let prevCenter = 0;        // مركز فجوة آخر صف — أساس ضمان إمكانية العبور
 best = 0;
 try { best = parseFloat(localStorage.getItem("up_best") || "0") || 0; } catch (e) {}
 
@@ -177,7 +162,8 @@ function reset() {
   ball = { x: W / 2, y: startY, vy: 0 };
   cameraY = startY - H * 0.72;   // الكرة تبدأ قرب أسفل الشاشة
   rows = [];
-  lastRowY = startY - 260;
+  lastRowY = startY - 200;
+  prevCenter = W / 2;        // تبدأ الكرة في المنتصف
   meters = 0; shake = 0; flash = 0; time = 0;
   trail = []; wasPressing = false;
   spawnAhead();
@@ -187,46 +173,71 @@ function reset() {
 function beltIndex() { return Math.floor(meters / BELT_METERS); }
 function beltData()  { return BELTS[beltIndex() % BELTS.length]; }
 
+/* ضمان إمكانية العبور:
+   كل صف يعرف أين كانت فجوة الصف السابق. كلما بعُدت الفجوة الجديدة أفقياً،
+   زاد الفاصل الرأسي المطلوب — فيستحيل أن يتولّد صفّان لا ممرّ بينهما. */
+const MIN_DY = 104;        // أدنى فاصل رأسي مطلق (ارتفاع الحاجز + قطر الكرة + هامش)
+const DY_PER_PX = 0.52;    // فاصل رأسي إضافي لكل بكسل انتقال أفقي مطلوب
+const SAFE_METERS = 45;    // منطقة إقلاع آمنة بلا عوائق
+const EASE_METERS = 90;    // لا تتصاعد الصعوبة قبل هذا الارتفاع
+
 function spawnAhead() {
   // نولّد صفوفاً أعلى من حافة الشاشة العلوية بمسافة أمان
-  while (lastRowY > cameraY - 300) {
+  while (lastRowY > cameraY - 400) {
     const mRow = (startY - lastRowY) / PX_PER_M;   // ارتفاع هذا الصف بالأمتار
-    const d = Math.min(1, mRow / S.rampTo);        // معامل الصعوبة: 0 عند البداية → 1 عند الذروة
-    const rowGap = Math.max(135, S.rowGap * (1 - 0.42 * d));   // كثافة أعلى مع الارتفاع
-    lastRowY -= rowGap * (0.85 + Math.random() * 0.3);
-    const gapW = Math.max(100, S.gapW * (1 - 0.34 * d));       // فجوات أضيق مع الارتفاع
+
+    // منطقة إقلاع: يتعوّد اللاعب على التحكم قبل أي خطر
+    if (mRow < SAFE_METERS) { lastRowY -= 140; continue; }
+
+    const d = Math.max(0, Math.min(1, (mRow - EASE_METERS) / S.rampTo));
+    const gapW = Math.max(118, S.gapW * (1 - 0.26 * d));
+    const barH = 22;
+    const desiredDy = Math.max(158, S.rowGap * (1 - 0.30 * d));
+    // أقصى انتقال أفقي تسمح به هذه المسافة الرأسية
+    const maxShift = Math.min(W * 0.78, Math.max(85, (desiredDy - MIN_DY) / DY_PER_PX));
+    const half = gapW / 2 + 8;
+
+    // يختار مركز فجوة ضمن مدى يمكن بلوغه من الفجوة السابقة
+    const pick = (limit) => {
+      const lo = Math.max(half, prevCenter - limit);
+      const hi = Math.min(W - half, prevCenter + limit);
+      const c = hi > lo ? lo + Math.random() * (hi - lo) : (lo + hi) / 2;
+      return Math.max(half, Math.min(W - half, c));
+    };
+
     const roll = Math.random();
-    const barH = 24;
-    if (mRow > 120 && roll < 0.18) {
-      // بوابة نابضة: تنفتح وتنغلق — تفرض التوقيت والتريّث (إفلات/هبوط)
-      const gx = gapW / 2 + 30 + Math.random() * (W - gapW - 60);
-      rows.push({ y: lastRowY, h: barH, gapX: gx, gapW: gapW * 1.35, pulse: true,
-                  speed: (1.5 + Math.random() * 0.8) * (1 + 0.6 * d), phase: Math.random() * 6.28 });
-    } else if (mRow > 200 && roll < 0.18 + 0.32 * d) {
-      // حاجز متحرك أفقياً — يزداد تكراراً وسرعةً مع الارتفاع
-      const gx = gapW / 2 + 40 + Math.random() * (W - gapW - 80);
-      rows.push({ y: lastRowY, h: barH, gapX: gx, gapW: gapW,
-                  amp: (40 + Math.random() * 50) * (1 + 0.5 * d),
-                  speed: (0.9 + Math.random() * 0.5) * (1 + 1.4 * d),
-                  phase: Math.random() * 6.28, moving: true });
-    } else if (mRow > 200 && roll < 0.50 + 0.15 * d) {
-      // ممر متعرج: صفّان متقاربان بفجوتين متباعدتين — يفرض إبطاء الصعود
-      const gx1 = gapW / 2 + 20 + Math.random() * (W - gapW - 40);
-      let gx2 = gx1 + (Math.random() < 0.5 ? -1 : 1) * (150 + Math.random() * 80);
-      gx2 = Math.max(gapW / 2 + 20, Math.min(W - gapW / 2 - 20, gx2));
-      rows.push({ y: lastRowY, h: barH, gapX: gx1, gapW: gapW });
-      rows.push({ y: lastRowY - 95, h: barH, gapX: gx2, gapW: gapW });
-      lastRowY -= 95;
-    } else if (roll < 0.72) {
-      // حاجز جانبي: يترك ممراً في أحد الجانبين
+    let row, center, extraShift = 0;
+
+    if (mRow > 320 && roll < 0.14 + 0.16 * d) {
+      // حاجز متحرك أفقياً — السعة محدودة بما يُبقي الفجوة داخل الشاشة
+      const amp = Math.max(25, Math.min(52 * (1 + 0.45 * d), (W - gapW) / 2 - 12));
+      center = Math.max(half + amp, Math.min(W - half - amp, pick(maxShift * 0.8)));
+      extraShift = amp * 0.9;                 // الفجوة تتحرك، فنحسب أسوأ وضع لها
+      row = { h: barH, gapX: center, gapW: gapW, moving: true, amp: amp,
+              speed: (0.8 + Math.random() * 0.4) * (1 + 1.1 * d), phase: Math.random() * 6.28 };
+    } else if (mRow > 220 && roll < 0.30) {
+      // بوابة نابضة — تضيق وتتسع لكنها لا تُغلق إغلاقاً تاماً أبداً
+      center = pick(maxShift * 0.9);
+      row = { h: barH, gapX: center, gapW: gapW * 1.3, pulse: true,
+              speed: 1.1 + Math.random() * 0.5, phase: Math.random() * 6.28 };
+    } else if (mRow > 150 && roll < 0.48) {
+      // ممر جانبي: الحاجز من جهة والممر من الأخرى
       const fromLeft = Math.random() < 0.5;
-      const wBar = W - gapW - (20 + Math.random() * 60);
-      rows.push({ y: lastRowY, h: barH, side: true, fromLeft, w: Math.max(60, wBar) });
+      const corridor = gapW + 34 + Math.random() * 40;
+      const w = Math.max(55, W - corridor);
+      center = fromLeft ? (w + W) / 2 : corridor / 2;
+      row = { h: barH, side: true, fromLeft: fromLeft, w: w };
     } else {
-      // حاجز بفجوة في موضع عشوائي
-      const gx = gapW / 2 + 20 + Math.random() * (W - gapW - 40);
-      rows.push({ y: lastRowY, h: barH, gapX: gx, gapW: gapW, moving: false });
+      center = pick(maxShift);
+      row = { h: barH, gapX: center, gapW: gapW };
     }
+
+    // الفاصل الرأسي = الأكبر بين المطلوب تصميمياً والمطلوب لضمان العبور
+    const need = MIN_DY + (Math.abs(center - prevCenter) + extraShift) * DY_PER_PX;
+    lastRowY -= Math.max(desiredDy, need);
+    row.y = lastRowY;
+    rows.push(row);
+    prevCenter = center;
   }
   // تنظيف الصفوف التي خرجت من أسفل الشاشة
   rows = rows.filter(r => r.y < cameraY + H + 250);
@@ -244,7 +255,6 @@ function onDown(e) {
   pressing = true;
   if (state === "ready") { state = "playing"; hideOverlay(); }
   else if (state === "dead") { reset(); state = "playing"; hideOverlay(); }
-  if (mode === "tap" && state === "playing") ball.vy = -S.tapImpulse;  // نبضة فورية
 }
 function onMove(e) { if (pressing) { e.preventDefault(); targetX = pointerPos(e); } }
 function onUp() { pressing = false; }
@@ -262,7 +272,6 @@ window.addEventListener("keydown", e => {
   if (e.code === "Space") {
     if (state === "ready") { state = "playing"; hideOverlay(); }
     else if (state === "dead") { reset(); state = "playing"; hideOverlay(); }
-    else if (mode === "tap" && state === "playing" && !e.repeat) ball.vy = -S.tapImpulse;
   }
 });
 window.addEventListener("keyup", e => { keys[e.code] = false; });
@@ -323,25 +332,6 @@ document.getElementById("resetPanel").addEventListener("click", () => {
   saveSettings(); buildSliders();
 });
 
-/* اختيار نموذج التحكم — للمقارنة المباشرة بين الضغط المطوّل والنقر */
-const modeHoldBtn = document.getElementById("modeHold");
-const modeTapBtn = document.getElementById("modeTap");
-function applyMode(m) {
-  mode = m;
-  modeHoldBtn.classList.toggle("on", m === "hold");
-  modeTapBtn.classList.toggle("on", m === "tap");
-  saveSettings();
-  updateHint();
-}
-modeHoldBtn.addEventListener("click", () => applyMode("hold"));
-modeTapBtn.addEventListener("click", () => applyMode("tap"));
-
-function updateHint() {
-  if (state !== "ready") return;
-  ovText.innerHTML = mode === "hold"
-    ? "اضغط مع الاستمرار للصعود<br>حرّك إصبعك يميناً ويساراً للتوجيه<br>ارفع إصبعك للهبوط"
-    : "انقر بتكرار للصعود<br>حرّك إصبعك يميناً ويساراً للتوجيه<br>توقف عن النقر للهبوط";
-}
 
 /* ---------- الفيزياء ---------- */
 function rowRects(r) {
@@ -354,9 +344,9 @@ function rowRects(r) {
   let gw = r.gapW;
   if (r.moving) gx += Math.sin(time * r.speed + r.phase) * r.amp;
   if (r.pulse) {
-    // فتحة تتنفس: من شبه مغلقة إلى مفتوحة بالكامل
+    // فتحة تتنفس: تضيق وتتسع، لكنها تبقى قابلة للعبور دائماً
     const open = 0.5 + 0.5 * Math.sin(time * r.speed + r.phase);
-    gw = r.gapW * (0.08 + 0.92 * open);
+    gw = r.gapW * (0.46 + 0.54 * open);
   }
   gx = Math.max(gw / 2 + 6, Math.min(W - gw / 2 - 6, gx));
   return [
@@ -380,16 +370,11 @@ function update(dt) {
   const kbLeft = keys["ArrowLeft"], kbRight = keys["ArrowRight"];
   const isPressing = pressing || kbPress;
 
-  // عمودي
-  if (mode === "hold") {
-    // قصّ الزخم عند تغيّر الاتجاه: يمنع "تعلّق" الكرة في الهواء عند رفع الإصبع
-    if (isPressing && !wasPressing && ball.vy > 0) ball.vy *= S.snap;
-    if (!isPressing && wasPressing && ball.vy < 0) ball.vy *= S.snap;
-    if (isPressing) ball.vy -= S.lift * dt;
-    else            ball.vy += S.gravity * dt;
-  } else {
-    ball.vy += S.gravity * dt;   // وضع النقر: جاذبية دائمة + نبضات لحظية
-  }
+  // عمودي — قصّ الزخم عند تغيّر الاتجاه يمنع "تعلّق" الكرة في الهواء
+  if (isPressing && !wasPressing && ball.vy > 0) ball.vy *= S.snap;
+  if (!isPressing && wasPressing && ball.vy < 0) ball.vy *= S.snap;
+  if (isPressing) ball.vy -= S.lift * dt;
+  else            ball.vy += S.gravity * dt;
   wasPressing = isPressing;
   ball.vy = Math.max(-S.maxRise, Math.min(S.maxFall, ball.vy));
   ball.y += ball.vy * dt;
@@ -397,7 +382,7 @@ function update(dt) {
   // أفقي: انسياب نحو موضع الإصبع
   if (kbLeft || kbRight) {
     ball.x += (kbLeft ? -1 : 1) * 460 * dt;
-  } else if (mode === "tap" || pressing) {
+  } else if (pressing) {
     ball.x += (targetX - ball.x) * Math.min(1, S.steer * dt);
   }
   ball.x = Math.max(BALL_R, Math.min(W - BALL_R, ball.x));
@@ -440,7 +425,7 @@ function die() {
   if (meters > best) { best = meters; localStorage.setItem("up_best", best); }
   bestEl.textContent = "الأفضل: " + Math.floor(best) + "م";
   showDeath();
-  if (navigator.vibrate) navigator.vibrate(60);
+  try { if (navigator.vibrate) navigator.vibrate(60); } catch (e) {}
 }
 
 /* ---------- الرسم ---------- */
@@ -549,7 +534,6 @@ function loop(now) {
 }
 
 bestEl.textContent = "الأفضل: " + Math.floor(best) + "م";
-applyMode(mode);
 reset();
 booted = true;
 resize();            // ضمان أبعاد صحيحة لو حُمّلت الصفحة في تبويب مخفي
