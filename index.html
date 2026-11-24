@@ -69,7 +69,7 @@
 <div id="overlay">
   <h1>UP</h1>
   <div class="big" id="ovScore" style="display:none">0م</div>
-  <div class="sub" id="ovText">اضغط مع الاستمرار للصعود<br>حرّك إصبعك يميناً ويساراً للتوجيه<br>ارفع إصبعك للهبوط</div>
+  <div class="sub" id="ovText">اضغط مع الاستمرار للصعود<br>اسحب إصبعك يميناً ويساراً للتوجيه<br>ارفع إصبعك للهبوط</div>
   <div class="sub" style="opacity:.6">اضغط في أي مكان للبدء</div>
 </div>
 
@@ -96,13 +96,14 @@ const DEFAULTS = {
   maxRise:   { v: 620,  min: 300,  max: 1200, step: 20,  name: "أقصى سرعة صعود" },
   maxFall:   { v: 840,  min: 300,  max: 1500, step: 20,  name: "أقصى سرعة هبوط" },
   steer:     { v: 18,   min: 4,    max: 30,   step: 1,   name: "استجابة التوجيه" },
+  dragGain:  { v: 1.6,  min: 0.8,  max: 3.0,  step: 0.1, name: "حساسية السحب الأفقي" },
   gapW:      { v: 200,  min: 110,  max: 300,  step: 5,   name: "عرض الفجوات (البداية)" },
   rowGap:    { v: 275,  min: 160,  max: 420,  step: 5,   name: "التباعد بين العوائق (البداية)" },
   rampTo:    { v: 1800, min: 600,  max: 3500, step: 100, name: "مدى تصاعد الصعوبة (م)" },
   hitbox:    { v: 0.66, min: 0.4,  max: 1.0,  step: 0.02,name: "حجم منطقة الاصطدام (عدالة)" },
 };
 // يُرفَع كلما تغيّرت القيم الافتراضية، حتى لا يبقى اللاعب على إعدادات قديمة محفوظة
-const TUNING_VERSION = 3;
+const TUNING_VERSION = 4;
 
 let S = {};
 function loadSettings() {
@@ -253,27 +254,39 @@ function spawnAhead() {
 }
 
 /* ---------- الإدخال: اضغط واسحب ---------- */
-let pressing = false, targetX = W / 2;
+let pressing = false, targetX = W / 2, grabPointerX = 0, grabBallX = 0;
 function pointerPos(e) { return e.touches ? e.touches[0].clientX : e.clientX; }
 
 function onDown(e) {
   if (!document.getElementById("panel").classList.contains("hidden")) return;
   if (e.target.closest("#gearBtn")) return;
   e.preventDefault();
-  targetX = pointerPos(e);
-  pressing = true;
   if (state === "ready") { state = "playing"; hideOverlay(); }
   else if (state === "dead") { reset(); state = "playing"; hideOverlay(); }
+  // تحكم نسبي: اللمس وحده لا يحرّك الكرة — الحركة تأتي من إزاحة الإصبع فقط
+  grabPointerX = pointerPos(e);
+  grabBallX = ball.x;
+  targetX = ball.x;
+  pressing = true;
 }
-function onMove(e) { if (pressing) { e.preventDefault(); targetX = pointerPos(e); } }
+function onMove(e) {
+  if (!pressing) return;
+  e.preventDefault();
+  const dx = (pointerPos(e) - grabPointerX) * S.dragGain;
+  targetX = Math.max(BALL_R, Math.min(W - BALL_R, grabBallX + dx));
+}
 function onUp() { pressing = false; }
 
-window.addEventListener("touchstart", onDown, { passive: false });
+// على الأجهزة اللمسية نتجاهل أحداث الفأرة التوافقية حتى لا يصل إدخال مزدوج
+let touchSeen = false;
+const mouseGuard = (fn) => (e) => { if (!touchSeen) fn(e); };
+window.addEventListener("touchstart", e => { touchSeen = true; onDown(e); }, { passive: false });
 window.addEventListener("touchmove", onMove, { passive: false });
 window.addEventListener("touchend", onUp);
-window.addEventListener("mousedown", onDown);
-window.addEventListener("mousemove", onMove);
-window.addEventListener("mouseup", onUp);
+window.addEventListener("touchcancel", onUp);
+window.addEventListener("mousedown", mouseGuard(onDown));
+window.addEventListener("mousemove", mouseGuard(onMove));
+window.addEventListener("mouseup", mouseGuard(onUp));
 // دعم لوحة المفاتيح للتجربة على الكمبيوتر
 const keys = {};
 window.addEventListener("keydown", e => {
