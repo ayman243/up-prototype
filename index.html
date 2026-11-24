@@ -101,10 +101,19 @@ const DEFAULTS = {
   rampTo:    { v: 1800, min: 600,  max: 3500, step: 100, name: "مدى تصاعد الصعوبة (م)" },
   hitbox:    { v: 0.66, min: 0.4,  max: 1.0,  step: 0.02,name: "حجم منطقة الاصطدام (عدالة)" },
 };
+// يُرفَع كلما تغيّرت القيم الافتراضية، حتى لا يبقى اللاعب على إعدادات قديمة محفوظة
+const TUNING_VERSION = 3;
+
 let S = {};
 function loadSettings() {
   let saved = {};
-  try { saved = JSON.parse(localStorage.getItem("up_tuning") || "{}"); } catch (e) {}
+  try {
+    if (parseInt(localStorage.getItem("up_tuning_v") || "0", 10) !== TUNING_VERSION) {
+      localStorage.removeItem("up_tuning");
+      localStorage.setItem("up_tuning_v", String(TUNING_VERSION));
+    }
+    saved = JSON.parse(localStorage.getItem("up_tuning") || "{}");
+  } catch (e) {}
   for (const k in DEFAULTS) S[k] = (typeof saved[k] === "number") ? saved[k] : DEFAULTS[k].v;
 }
 function saveSettings() {
